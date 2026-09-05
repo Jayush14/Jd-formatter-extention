@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Multi-Job JD Collector",
+  "version": "1.0",
+  "description": "Scans job links, extracts structured JDs on load, and exports batch JSON.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "tabs",
+    "clipboardWrite"
+  ],
+  "host_permissions": [
+    "https://www.linkedin.com/*",
+    "https://*.linkedin.com/*",
+    "https://www.naukri.com/*"
+  ],
+  "action": {
+    "default_title": "Job Collector",
+    "default_popup": "popup.html"
+  }
+}

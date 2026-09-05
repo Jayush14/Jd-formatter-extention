@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { width: 340px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 12px; margin: 0; background: #f8f9fa; }
+    h3 { margin-top: 0; font-size: 15px; color: #111; display: flex; justify-content: space-between; align-items: center; }
+    .btn { width: 100%; padding: 8px 12px; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 13px; margin-bottom: 8px; }
+    .btn-primary { background: #0a66c2; color: #fff; }
+    .btn-primary:hover { background: #084e96; }
+    .btn-success { background: #057a55; color: #fff; }
+    .btn-danger { background: #e02424; color: #fff; width: 48%; }
+    .btn-secondary { background: #4b5563; color: #fff; width: 48%; }
+    .btn-sm { padding: 4px 8px; font-size: 11px; }
+    .actions { display: flex; justify-content: space-between; margin-top: 8px; }
+    #jobList { max-height: 280px; overflow-y: auto; margin: 10px 0; padding: 0;
+               list-style: none; border: 1px solid #e5e7eb; border-radius: 6px;
+               background: #fff; }
+    .job-item { padding: 10px; border-bottom: 1px solid #f3f4f6;
+                display: flex; justify-content: space-between;
+                align-items: flex-start; font-size: 12px; }
+    .job-item:last-child { border-bottom: none; }
+    .job-info { flex-grow: 1; min-width: 0; margin-right: 10px; }
+    .job-title { font-weight: 600; color: #1f2937; margin-bottom: 2px;
+                 display: block; }
+    .job-company { color: #6b7280; font-size: 11px; margin-bottom: 2px; }
+    .job-description-preview { font-size: 11px; color: #666;
+                               line-height: 1.4; }
+    .job-actions { display: flex; gap: 6px; align-items: center; }
+    .badge { font-size: 10px; padding: 2px 6px; border-radius: 4px;
+             font-weight: bold; cursor: pointer; }
+    .badge-process { background: #e1effe; color: #1e429f; border: 1px solid #b4c6fc; }
+    .badge-done { background: #def7ec; color: #03543f; }
+    #count { font-size: 11px; font-weight: normal; color: #6b7280; }
+    .progress-bar { width: 100%; height: 4px; background: #e5e7eb;
+                    border-radius: 2px; overflow: hidden; margin: 8px 0; }
+    .progress-fill { height: 100%; background: #0a66c2; width: 0%;
+                     transition: width 0.3s ease; }
+  </style>
+</head>
+<body>
+  <h3>
+    Job Collector Dashboard
+    <span id="count">0 Saved</span>
+  </h3>
+
+  <button id="scanBtn" class="btn btn-primary">Scan Page for Jobs</button>
+
+  <ul id="jobList">
+    <li class="job-item"><span class="job-info">Click "Scan Page" to discover and process jobs</span></li>
+  </ul>
+
+  <div class="actions">
+    <button id="exportBtn" class="btn btn-success" style="width:100%;">Export All JSON File</button>
+  </div>
+  <div class="actions">
+    <button id="copyBtn" class="btn btn-secondary">Copy All</button>
+    <button id="clearBtn" class="btn btn-danger">Clear Storage</button>
+  </div>
+
+  <div id="progressContainer" style="display:none;">
+    <div id="progressText">Processing jobs...</div>
+    <div class="progress-bar">
+      <div id="progressFill" class="progress-fill"></div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
