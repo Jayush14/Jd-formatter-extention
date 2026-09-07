@@ -67,7 +67,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const htmlText = await response.text();
 
       // Parse full LinkedIn job
-      const parsed = extractLinkedInJob(htmlText, job);
+      const parsed = await extractLinkedInJob(htmlText, job, tabId);
 
       console.error("Parsed LinkedIn job:", parsed);
 
@@ -263,7 +263,7 @@ function firstText(doc, selectors) {
   return "";
 }
 
-function extractLinkedInJob(htmlText, fallback = {}) {
+async function extractLinkedInJob(htmlText, fallback = {}, tabId) {
   const parser = new DOMParser();
   const doc = parser.parseFromString(htmlText, "text/html");
 
@@ -331,38 +331,89 @@ function extractLinkedInJob(htmlText, fallback = {}) {
     }
   }
 
-  // -----------------------------
-  // POSTED DATE
-  // -----------------------------
-  let postedAt =
-    firstText(doc, [
-      ".posted-time-ago__text",
-      ".topcard__flavor--metadata",
-      "time",
-      "[class*='posted']",
-      "[class*='listdate']"
-    ]) ||
-    fallback.postedAt ||
-    "";
+// -----------------------------
+// POSTED DATE
+// -----------------------------
+let postedAtRaw =
+  firstText(doc, [
+    ".posted-time-ago__text",
+    ".topcard__flavor--metadata",
+    "time",
+    "[class*='posted']",
+    "[class*='listdate']"
+  ]) ||
+  fallback.postedAt ||
+  "";
 
-  // Search whole top-card area for "X days ago"
-  if (!postedAt) {
-    const topCard =
-      doc.querySelector(".top-card-layout") ||
-      doc.querySelector(".topcard") ||
-      doc.body;
+let postedAt = null;
 
-    const topText = cleanText(topCard?.innerText);
+if (postedAtRaw) {
+  const now = new Date();
 
-    const match = topText.match(
-      /\b(\d+\s+(?:minute|minutes|hour|hours|day|days|week|weeks|month|months|year|years)\s+ago)\b/i
-    );
+  const match = postedAtRaw.match(
+    /(\d+)\s+(minute|minutes|hour|hours|day|days|week|weeks|month|months|year|years)\s+ago/i
+  );
 
-    if (match) {
-      postedAt = match[1];
+  if (match) {
+    const amount = parseInt(match[1], 10);
+    const unit = match[2].toLowerCase();
+
+    const postedDate = new Date(now);
+
+    switch (unit) {
+      case "minute":
+      case "minutes":
+        postedDate.setMinutes(
+          postedDate.getMinutes() - amount
+        );
+        break;
+
+      case "hour":
+      case "hours":
+        postedDate.setHours(
+          postedDate.getHours() - amount
+        );
+        break;
+
+      case "day":
+      case "days":
+        postedDate.setDate(
+          postedDate.getDate() - amount
+        );
+        break;
+
+      case "week":
+      case "weeks":
+        postedDate.setDate(
+          postedDate.getDate() - (amount * 7)
+        );
+        break;
+
+      case "month":
+      case "months":
+        postedDate.setMonth(
+          postedDate.getMonth() - amount
+        );
+        break;
+
+      case "year":
+      case "years":
+        postedDate.setFullYear(
+          postedDate.getFullYear() - amount
+        );
+        break;
+    }
+
+    postedAt = postedDate.toISOString();
+  } else {
+    // If LinkedIn gives an actual date instead of "X days ago"
+    const parsedDate = new Date(postedAtRaw);
+
+    if (!isNaN(parsedDate.getTime())) {
+      postedAt = parsedDate.toISOString();
     }
   }
-
+}
   // -----------------------------
   // DESCRIPTION
   // -----------------------------
@@ -458,29 +509,9 @@ async function getWorkplaceTypeFromLinkedInPage(tabId) {
   return result?.[0]?.result || "";
 }
 
-function getLinkedInWorkplaceType(doc) {
- const checkIcon = document.getElementById("check-small");
 
-      if (!checkIcon) {
-        console.log("check-small not found in live DOM");
-        return "";
-      }
 
-      const valueSpan = checkIcon.nextElementSibling;
-
-      if (!valueSpan) {
-        console.log("No next element after check-small");
-        return "";
-      }
-
-      const value = valueSpan.innerText?.trim() || "";
-
-      console.log("Workplace type from live DOM:", value);
-
-      return value;
-}
-
-const workplaceType = getLinkedInWorkplaceType(doc);
+const workplaceType = await getWorkplaceTypeFromLinkedInPage(tabId);
   // -----------------------------
   // EMPLOYMENT TYPE
   // -----------------------------
