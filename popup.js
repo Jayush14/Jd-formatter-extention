@@ -8,6 +8,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const progressContainer = document.getElementById("progressContainer");
   const progressText = document.getElementById("progressText");
   const progressFill = document.getElementById("progressFill");
+  console.log("🔥 POPUP.JS LOADED");
 
   function renderSavedJobs() {
     chrome.storage.local.get({ savedJds: [] }).then((result) => {
@@ -16,116 +17,515 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // Function to process a single job (extract description and save)
-  async function processJob(job, index, total) {
-    // Validate job object
-    if (!job || !job.url) {
-      console.error("Invalid job object:", job);
-      return { success: false, error: "Invalid job object" };
+ async function processJob(job, index, total, tabId) {
+  // Validate job object
+  if (!job || !job.url) {
+    console.error("Invalid job object:", job);
+    return {
+      success: false,
+      error: "Invalid job object"
+    };
+  }
+
+  try {
+    let jdText = "";
+    let host = "";
+
+    // --------------------------------------------------
+    // Validate URL
+    // --------------------------------------------------
+    try {
+      host = new URL(job.url).hostname;
+    } catch (urlError) {
+      throw new Error(`Invalid job URL: ${job.url}`);
     }
 
-    try {
-      let jdText = "";
-      let host = "";
-
-      try {
-        host = new URL(job.url).hostname;
-      } catch (urlError) {
-        throw new Error(`Invalid job URL: ${job.url}`);
+    // ==================================================
+    // LINKEDIN
+    // ==================================================
+    if (host.includes("linkedin.com")) {
+      if (!job.linkedinJobID) {
+        throw new Error("Missing LinkedIn job ID");
       }
 
-      if (host.includes("linkedin.com")) {
-        // Validate LinkedIn job ID
-        if (!job.linkedinJobID) {
-          throw new Error("Missing LinkedIn job ID");
-        }
-        // Use LinkedIn guest API
-        const apiUrl = `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${job.linkedinJobID}`;
-        const response = await fetch(apiUrl);
+      const apiUrl =
+        `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${job.linkedinJobID}`;
 
-        if (!response.ok) {
-          throw new Error(`LinkedIn API error! Status: ${response.status}`);
-        }
+      console.error("Fetching LinkedIn job:", apiUrl);
 
-        const htmlText = await response.text();
-        jdText = extractLinkedInDescription(htmlText);
-      } else if (host.includes("naukri.com")) {
-        // Validate Naukri job ID
-        if (!job.naukriJobID) {
-          throw new Error("Missing Naukri job ID");
-        }
-        // Fetch Naukri job page
-        const response = await fetch(job.url);
+      const response = await fetch(apiUrl, {
+        method: "GET",
+        credentials: "omit"
+      });
 
-        if (!response.ok) {
-          throw new Error(`Naukri fetch error! Status: ${response.status}`);
-        }
-
-        const htmlText = await response.text();
-        jdText = extractNaukriDescription(htmlText);
-      } else {
-        throw new Error("Unsupported platform");
+      if (!response.ok) {
+        throw new Error(
+          `LinkedIn API error! Status: ${response.status}`
+        );
       }
+
+      const htmlText = await response.text();
+
+      // Parse full LinkedIn job
+      const parsed = extractLinkedInJob(htmlText, job);
+
+      console.error("Parsed LinkedIn job:", parsed);
+
+      // Validate title
+      if (!parsed.title) {
+        throw new Error(
+          "Could not extract LinkedIn job title"
+        );
+      }
+
+      // Validate description
+      if (
+        !parsed.description ||
+        parsed.description.length < 50
+      ) {
+        throw new Error(
+          "Could not extract LinkedIn job description"
+        );
+      }
+
+      // Merge parsed data into the current job object
+      job = {
+        ...job,
+        ...parsed
+      };
+
+      // Description used for storage
+      jdText = parsed.description;
+    }
+
+    // ==================================================
+    // NAUKRI
+    // ==================================================
+    else if (host.includes("naukri.com")) {
+      if (!job.naukriJobID) {
+        throw new Error("Missing Naukri job ID");
+      }
+
+      const response = await fetch(job.url);
+
+      if (!response.ok) {
+        throw new Error(
+          `Naukri fetch error! Status: ${response.status}`
+        );
+      }
+
+      const htmlText = await response.text();
+
+      jdText = extractNaukriDescription(htmlText);
 
       if (!jdText || jdText.length < 50) {
-        throw new Error("Extracted description too short or empty.");
+        throw new Error(
+          "Could not extract Naukri job description"
+        );
       }
-
-      // Save to Chrome storage
-      const storageResult = await chrome.storage.local.get({ savedJds: [] });
-      const updated = storageResult.savedJds;
-      const jobToSave = {
-        title: job.title || "Unknown Title",
-        company: job.company || "Unknown Company",
-        url: job.url,
-        extracted_at: new Date().toISOString(),
-        job_description: jdText
-      };
-
-      // Add the appropriate job ID field
-      if (job.linkedinJobID) {
-        jobToSave.linkedinJobID = job.linkedinJobID;
-      } else if (job.naukriJobID) {
-        jobToSave.naukriJobID = job.naukriJobID;
-      }
-
-      updated.push(jobToSave);
-
-      await chrome.storage.local.set({ savedJds: updated });
-      renderSavedJobs();
-
-      // Return the processed job for display
-      return {
-        success: true,
-        job: {
-          ...job,
-          job_description: jdText
-        }
-      };
-    } catch (err) {
-      console.error("Processing error for job:", job.title || 'Unknown', err);
-      return { success: false, error: err.message };
     }
+
+    // ==================================================
+    // UNSUPPORTED
+    // ==================================================
+    else {
+      throw new Error(
+        `Unsupported platform: ${host}`
+      );
+    }
+
+    // --------------------------------------------------
+    // Final description validation
+    // --------------------------------------------------
+    if (!jdText || jdText.length < 50) {
+      throw new Error(
+        "Extracted description too short or empty."
+      );
+    }
+
+    // --------------------------------------------------
+    // Load existing storage
+    // --------------------------------------------------
+    const storageResult =
+      await chrome.storage.local.get({
+        savedJds: []
+      });
+
+    const updated = storageResult.savedJds || [];
+
+    // --------------------------------------------------
+    // Build normalized object
+    // --------------------------------------------------
+    const jobToSave = {
+      source: host.includes("linkedin.com")
+        ? "linkedin"
+        : "naukri",
+
+      // IDs
+      ...(job.linkedinJobID
+        ? { linkedinJobID: job.linkedinJobID }
+        : {}),
+
+      ...(job.naukriJobID
+        ? { naukriJobID: job.naukriJobID }
+        : {}),
+
+      // Main job data
+      title: job.title || "Unknown Title",
+
+      company:
+        job.company || "Unknown Company",
+
+      location:
+        job.location || "",
+
+      workplaceType:
+        job.workplaceType ||
+        job.workplace ||
+        "",
+
+      employmentType:
+        job.employmentType || "",
+
+      postedAt:
+        job.postedAt || "",
+
+      url:
+        job.url || "",
+
+      // Description
+      description:
+        jdText,
+
+      // LinkedIn criteria
+      jobCriteria:
+        job.jobCriteria || {},
+
+      // Extraction timestamp
+      extracted_at:
+        new Date().toISOString()
+    };
+
+    console.log(
+      "Saving job:",
+      jobToSave
+    );
+
+    // --------------------------------------------------
+    // Save
+    // --------------------------------------------------
+    updated.push(jobToSave);
+
+    await chrome.storage.local.set({
+      savedJds: updated
+    });
+
+    // Refresh popup count
+    renderSavedJobs();
+
+    // --------------------------------------------------
+    // Return processed job
+    // --------------------------------------------------
+    return {
+      success: true,
+      job: jobToSave
+    };
+
+  } catch (err) {
+    console.error(
+      "Processing error for job:",
+      job?.title || "Unknown",
+      err
+    );
+
+    return {
+      success: false,
+      error: err?.message || "Unknown error"
+    };
   }
+}
 
   // Function to extract LinkedIn description from HTML
-  function extractLinkedInDescription(htmlText) {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(htmlText, "text/html");
+function cleanText(value) {
+  return (value || "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
-    const descContainer = doc.querySelector(".show-more-less-html__markup") ||
-                          doc.querySelector(".description__text") ||
-                          doc.querySelector("section.description");
-
-    let jdText = descContainer ? descContainer.innerText.trim() : "";
-
-    if (!jdText) {
-      const bodyText = doc.body ? doc.body.innerText.trim() : "";
-      if (bodyText.length > 100) jdText = bodyText;
+function firstText(doc, selectors) {
+  for (const selector of selectors) {
+    const el = doc.querySelector(selector);
+    if (el) {
+      const text = cleanText(el.innerText || el.textContent);
+      if (text) return text;
     }
+  }
+  return "";
+}
 
-    return jdText;
+function extractLinkedInJob(htmlText, fallback = {}) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(htmlText, "text/html");
+
+  // -----------------------------
+  // TITLE
+  // -----------------------------
+  const title =
+    firstText(doc, [
+      ".top-card-layout__title",
+      "h1.topcard__title",
+      ".jobs-unified-top-card__job-title",
+      ".job-details-jobs-unified-top-card__job-title",
+      "h1"
+    ]) ||
+    fallback.title ||
+    "";
+
+  // -----------------------------
+  // COMPANY
+  // -----------------------------
+  const company =
+    firstText(doc, [
+      ".topcard__org-name-link",
+      ".top-card-layout__card .topcard__org-name-link",
+      ".job-details-jobs-unified-top-card__company-name a",
+      ".jobs-unified-top-card__company-name a",
+      ".job-details-jobs-unified-top-card__company-name",
+      ".jobs-unified-top-card__company-name"
+    ]) ||
+    fallback.company ||
+    "";
+
+  // -----------------------------
+  // LOCATION
+  // -----------------------------
+  let location =
+    firstText(doc, [
+      ".topcard__flavor--bullet",
+      ".topcard__flavor",
+      ".top-card-layout__second-subline .topcard__flavor",
+      ".job-details-jobs-unified-top-card__primary-description-container .topcard__flavor",
+      ".jobs-unified-top-card__primary-description-container .topcard__flavor"
+    ]) ||
+    fallback.location ||
+    "";
+
+  // Sometimes LinkedIn gives multiple flavor elements.
+  // Find one that looks like a location.
+  if (!location) {
+    const locationCandidates = Array.from(
+      doc.querySelectorAll(
+        ".topcard__flavor, .topcard__flavor--bullet, [class*='primary-description'] span"
+      )
+    )
+      .map(el => cleanText(el.innerText || el.textContent))
+      .filter(Boolean);
+
+    const locationCandidate = locationCandidates.find(text =>
+      /,/.test(text) ||
+      /\b(remote|india|united states|usa|canada|uk|london|pune|bangalore|bengaluru|mumbai|hyderabad|delhi)\b/i.test(text)
+    );
+
+    if (locationCandidate) {
+      location = locationCandidate;
+    }
   }
 
+  // -----------------------------
+  // POSTED DATE
+  // -----------------------------
+  let postedAt =
+    firstText(doc, [
+      ".posted-time-ago__text",
+      ".topcard__flavor--metadata",
+      "time",
+      "[class*='posted']",
+      "[class*='listdate']"
+    ]) ||
+    fallback.postedAt ||
+    "";
+
+  // Search whole top-card area for "X days ago"
+  if (!postedAt) {
+    const topCard =
+      doc.querySelector(".top-card-layout") ||
+      doc.querySelector(".topcard") ||
+      doc.body;
+
+    const topText = cleanText(topCard?.innerText);
+
+    const match = topText.match(
+      /\b(\d+\s+(?:minute|minutes|hour|hours|day|days|week|weeks|month|months|year|years)\s+ago)\b/i
+    );
+
+    if (match) {
+      postedAt = match[1];
+    }
+  }
+
+  // -----------------------------
+  // DESCRIPTION
+  // -----------------------------
+  const descriptionEl =
+    doc.querySelector(".show-more-less-html__markup") ||
+    doc.querySelector(".description__text") ||
+    doc.querySelector("section.description") ||
+    doc.querySelector("[class*='description__text']") ||
+    doc.querySelector("[class*='job-description']");
+
+  let description = descriptionEl
+    ? descriptionEl.innerText.trim()
+    : "";
+
+  // -----------------------------
+  // JOB CRITERIA
+  // -----------------------------
+  const jobCriteria = {};
+
+  const criteriaItems = doc.querySelectorAll(
+    ".description__job-criteria-list li, " +
+    ".description__job-criteria-item, " +
+    "[class*='job-criteria'] li"
+  );
+
+  criteriaItems.forEach(item => {
+    const heading =
+      firstText(item, [
+        ".description__job-criteria-subheader",
+        "h3",
+        "h4"
+      ]) || "";
+
+    const value =
+      firstText(item, [
+        ".description__job-criteria-text",
+        "span"
+      ]) || "";
+
+    if (!heading || !value) return;
+
+    const normalizedHeading = heading.toLowerCase();
+
+    if (normalizedHeading.includes("seniority")) {
+      jobCriteria.seniorityLevel = value;
+    } else if (
+      normalizedHeading.includes("employment") ||
+      normalizedHeading.includes("job type")
+    ) {
+      jobCriteria.employmentType = value;
+    } else if (
+      normalizedHeading.includes("job function") ||
+      normalizedHeading.includes("function")
+    ) {
+      jobCriteria.jobFunction = value;
+    } else if (normalizedHeading.includes("industry")) {
+      jobCriteria.industries = value;
+    } else {
+      jobCriteria[heading] = value;
+    }
+  });
+
+  // -----------------------------
+// WORKPLACE TYPE
+// -----------------------------
+async function getWorkplaceTypeFromLinkedInPage(tabId) {
+  const result = await chrome.scripting.executeScript({
+    target: { tabId },
+
+    func: () => {
+      const checkIcon = document.getElementById("check-small");
+
+      if (!checkIcon) {
+        console.log("check-small not found in live DOM");
+        return "";
+      }
+
+      const valueSpan = checkIcon.nextElementSibling;
+
+      if (!valueSpan) {
+        console.log("No next element after check-small");
+        return "";
+      }
+
+      const value = valueSpan.innerText?.trim() || "";
+
+      console.log("Workplace type from live DOM:", value);
+
+      return value;
+    }
+  });
+
+  return result?.[0]?.result || "";
+}
+
+function getLinkedInWorkplaceType(doc) {
+ const checkIcon = document.getElementById("check-small");
+
+      if (!checkIcon) {
+        console.log("check-small not found in live DOM");
+        return "";
+      }
+
+      const valueSpan = checkIcon.nextElementSibling;
+
+      if (!valueSpan) {
+        console.log("No next element after check-small");
+        return "";
+      }
+
+      const value = valueSpan.innerText?.trim() || "";
+
+      console.log("Workplace type from live DOM:", value);
+
+      return value;
+}
+
+const workplaceType = getLinkedInWorkplaceType(doc);
+  // -----------------------------
+  // EMPLOYMENT TYPE
+  // -----------------------------
+  let employmentType =
+    jobCriteria.employmentType ||
+    firstText(doc, [
+      "[class*='employment-type']",
+      "[class*='job-type']"
+    ]) ||
+    "";
+
+  // Check visible labels if criteria did not expose it.
+  if (!employmentType) {
+    const candidates = Array.from(
+      doc.querySelectorAll("span, li, div, button")
+    )
+      .map(el => cleanText(el.innerText || el.textContent))
+      .filter(Boolean);
+
+    employmentType =
+      candidates.find(text =>
+        /^(full-time|part-time|contract|temporary|internship|volunteer)$/i.test(text)
+      ) || "";
+  }
+
+  // -----------------------------
+  // NORMALIZE
+  // -----------------------------
+  description = description
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  return {
+    title,
+    company,
+    location,
+    workplaceType,
+    employmentType,
+    postedAt,
+    description,
+    jobCriteria
+  };
+}
   // Function to extract Naukri description from HTML
   function extractNaukriDescription(htmlText) {
     const parser = new DOMParser();
@@ -261,20 +661,29 @@ document.addEventListener("DOMContentLoaded", () => {
 
             // Clean Company & Location Extraction - ORIGINAL LOGIC
             const companyEl = el.querySelector(".job-card-container__primary-description, .job-card-container__company-name, [class*='company-name'], .artdeco-entity-lockup__subtitle, .comp-name");
-            const company = companyEl ? companyEl.innerText.split("\n")[0].trim() : "Company Name";
-
-            const locationEl = el.querySelector(".job-card-container__metadata-item, [class*='metadata'], .artdeco-entity-lockup__caption, .loc");
-            const location = locationEl ? locationEl.innerText.split("\n")[0].trim() : "";
+const company = companyEl
+  ? companyEl.innerText.split("\n")[0].trim()
+  : "";
+const locationEl = el.querySelector(
+  ".job-card-container__metadata-item, " +
+  ".job-card-container__metadata-wrapper, " +
+  ".artdeco-entity-lockup__caption, " +
+  "[class*='location'], " +
+  "[class*='metadata']"
+);            const location = locationEl ? locationEl.innerText.split("\n")[0].trim() : "";
 
             localSeenIds.add(jobId);
 
             const isNaukri = href.includes("naukri.com");
-            const jobData = {
-              title: title,
-              company: location ? `${company} (${location})` : company,
-              url: isNaukri ? href : `https://www.linkedin.com/jobs/view/${jobId}/`,
-              extracted_at: new Date().toISOString()
-            };
+    const jobData = {
+  title: title,
+  company: company,
+  location: location,
+  url: isNaukri
+    ? href
+    : `https://www.linkedin.com/jobs/view/${jobId}/`,
+  extracted_at: new Date().toISOString()
+};
 
             if (isNaukri) {
               jobData.naukriJobID = jobId;
@@ -350,7 +759,7 @@ document.addEventListener("DOMContentLoaded", () => {
         progressText.textContent = `Processing job ${i + 1} flo ${uniqueNewJobs.length}: ${job.title}`;
 
         // Process the job
-        const result = await processJob(job, i, uniqueNewJobs.length);
+        const result = await processJob(job, i, uniqueNewJobs.length ,tab.id);
 
         if (result.success) {
           updateJobStatus(i, "saved");
